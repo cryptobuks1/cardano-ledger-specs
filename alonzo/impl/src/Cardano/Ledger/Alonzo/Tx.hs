@@ -44,6 +44,7 @@ module Cardano.Ledger.Alonzo.Tx
     WitnessPPDataHash,
     -- Figure 3
     Tx (Tx, body, wits, isValidating, auxiliaryData),
+    body', wits', isValidating', auxiliaryData',
     TxBody (..),
     -- Figure 4
     ScriptPurpose (..),
@@ -254,27 +255,38 @@ pattern Tx {body, wits, isValidating, auxiliaryData} <-
   where
     Tx b w v a = TxConstr $ memoBytes (encodeTxRaw $ TxRaw b w v a)
 
+
+-- We define these accessor functions manually, because if we define them using
+-- the record syntax in the Tx pattern, they inherit the constraints
+-- (Era era, ToCBOR (Core.AuxiliaryData era),ToCBOR (Core.TxBody era))
+-- constraint as a precondition. This is unnecessary, as one can see below.
+
+body' :: Tx era -> Core.TxBody era
+body' (TxConstr (Memo (TxRaw b _ _ _) _)) = b
+
+wits' :: Tx era -> TxWitness era
+wits' (TxConstr (Memo (TxRaw _ x _ _) _)) = x
+
+isValidating' :: Tx era -> IsValidating
+isValidating' (TxConstr (Memo (TxRaw _ _ x _) _)) = x
+
+auxiliaryData' :: Tx era -> StrictMaybe (Core.AuxiliaryData era)
+auxiliaryData' (TxConstr (Memo (TxRaw _ _ _ x) _)) = x
+
 -- ===================================
 -- WellFormed instances
 
 instance aux ~ (Core.AuxiliaryData era) => HasField "auxiliaryData" (Tx era) (StrictMaybe aux) where
-  getField (TxConstr (Memo (TxRaw _body _wits _ aux) _)) = aux
+  getField txr = auxiliaryData' txr
 
 instance (body ~ Core.TxBody era) => HasField "body" (Tx era) body where
-  getField (TxConstr (Memo (TxRaw bod _wits _ _aux) _)) = bod
-
---------------------------------------------------------------------------------
--- HasField instances for the Tx
---------------------------------------------------------------------------------
-
--- Note that we do not use the pattern synonym in these instances, since we
--- don't want to drag in the CBOR constraints.
+  getField txr = body' txr
 
 instance HasField "wits" (Tx era) (TxWitness era) where
-  getField (TxConstr (Memo txr _)) = _wits txr
+  getField txr = wits' txr
 
 instance HasField "isValidating" (Tx era) IsValidating where
-  getField (TxConstr (Memo txr _)) = _isValidating txr
+  getField txr = isValidating' txr
 
 -- =========================================================
 -- Figure 2: Definitions for Transactions
