@@ -23,15 +23,16 @@ import Cardano.Ledger.Alonzo.Scripts (ExUnits (..), Prices, scriptfee)
 import Cardano.Ledger.Alonzo.Tx
   ( Tx (..),
     isNonNativeScriptAddress,
+    minfee,
+    totExunits,
     txbody,
     txsize,
   )
 import Cardano.Ledger.Alonzo.TxBody
   ( TxOut (..),
-    txExunits,
+    inputs_fee',
     txUpdates,
-    txfee,
-    txinputs_fee,
+    txfee',
   )
 import qualified Cardano.Ledger.Alonzo.TxBody as Alonzo (TxBody, TxOut)
 import qualified Cardano.Ledger.Core as Core
@@ -171,56 +172,44 @@ instance
   ) =>
   NoThunks (UtxoPredicateFailure era)
 
--- ====================================
-
-minfee ::
-  ( HasField "_minfeeA" (Core.PParams era) Natural,
-    HasField "_minfeeB" (Core.PParams era) Natural,
-    HasField "_prices" (Core.PParams era) Prices
-  ) =>
-  Core.PParams era ->
-  Tx era ->
-  Coin
-minfee pp tx =
-  ((txsize tx) <×> a)
-    <+> b
-    <+> (scriptfee (getField @"_prices" pp) (txExunits (txbody tx)))
-  where
-    a = Coin (fromIntegral (getField @"_minfeeA" pp))
-    b = Coin (fromIntegral (getField @"_minfeeB" pp))
-
 -- =======================================
 -- feesOK is a predicate with 3 parts. Newly introduced in the
 -- Alonzo era. We can think of as "Returning" True, if all 3
 -- parts are True. As a TransitionRule it will return (), and
--- raise an error (rather than return)  if any of the 3 parts are False.
+-- raise an error (rather than return) if any of the 3 parts are False.
 
 feesOK ::
   forall era.
-  ( Core.Value era ~ Alonzo.Value (Crypto era),
-    Core.TxOut era ~ Alonzo.TxOut era,
-    ValidateScript era,
+  ( Core.TxOut era ~ Alonzo.TxOut era, -- minfee only defined in Alonzo era.
+    Core.Tx era ~ Tx era, -- minfee only defined n Alonzo era.
+    HasField "txinputs_fee" (Core.TxBody era) (Set (TxIn (Crypto era))),
     HasField "_minfeeA" (Core.PParams era) Natural,
     HasField "_minfeeB" (Core.PParams era) Natural,
-    HasField "_prices" (Core.PParams era) Prices
+    HasField "_prices" (Core.PParams era) Prices,
+    ValidateScript era
   ) =>
   Core.PParams era ->
-  Tx era ->
+  Core.Tx era ->
   UTxO era ->
   Rule (AlonzoUTXO era) 'Transition ()
-feesOK pp tx (UTxO m) = do
+feesOK pp tx (utxo@(UTxO m)) = do
   let txb = txbody tx
-      fees = txinputs_fee txb
+      theFee = getField @"txfee" txb -- Coin supplied to pay fees
+      fees = getField @"txinputs_fee" txb -- Inputs allocated to pay theFee
       utxoFees = eval (fees ◁ m) -- compute the domain restriction to those inputs where fees are paid
+      smallUTxO = restrict fees utxo
       bal = Val.coin (balance @era (UTxO utxoFees))
-      nonNative txout = isNonNativeScriptAddress tx (getField @"address" (txout :: (TxOut era)))
+      nonNative txout = isNonNativeScriptAddress @era tx (getField @"address" (txout :: (TxOut era)))
   -- Part 1
-  (bal >= txfee txb) ?! FeeTooSmallUTxO bal (txfee txb)
+  (bal >= theFee) ?! FeeTooSmallUTxO bal theFee
   -- Part 2
   (all (not . nonNative) utxoFees) ?! ScriptsNotPaidUTxO (UTxO (Map.filter nonNative utxoFees))
   -- Part 3
-  (minfee pp tx <= txfee txb) ?! FeeNotBalancedUTxO (minfee pp tx) (txfee txb)
+  (minfee pp tx <= theFee) ?! FeeNotBalancedUTxO (minfee pp tx) theFee
   pure ()
+
+restrict :: Set (TxIn (Crypto era)) -> UTxO era -> UTxO era
+restrict txins (UTxO m) = UTxO (eval (txins ◁ m))
 
 -- ================================================================
 
@@ -236,13 +225,15 @@ utxoTransition ::
     UsesPParams era,
     HasField "_minfeeA" (Core.PParams era) Natural,
     HasField "_minfeeB" (Core.PParams era) Natural,
+    HasField "vldt" (Alonzo.TxBody era) ValidityInterval,
     HasField "_keyDeposit" (Core.PParams era) Coin,
     HasField "_poolDeposit" (Core.PParams era) Coin,
     HasField "_minUTxOValue" (Core.PParams era) Coin,
     HasField "_maxTxSize" (Core.PParams era) Natural,
     HasField "_prices" (Core.PParams era) Prices,
     HasField "_maxTxExUnits" (Core.PParams era) ExUnits,
-    -- We fix Core.Value, Core.TxBody, and Core.TxOut
+    -- We fix Core.Tx, Core.Value, Core.TxBody, and Core.TxOut
+    Core.TxOut era ~ Alonzo.TxOut era,
     Core.Value era ~ Alonzo.Value (Crypto era),
     Core.TxBody era ~ Alonzo.TxBody era,
     Core.TxOut era ~ Alonzo.TxOut era
@@ -259,7 +250,7 @@ utxoTransition = do
 
   txins @era txb /= Set.empty ?! InputSetEmptyUTxO
 
-  feesOK pp tx utxo
+  -- feesOK pp tx utxo
 
   let minimumFee = minfee pp tx
       txFee = getField @"txfee" txb
@@ -338,7 +329,7 @@ utxoTransition = do
   txSize_ <= maxTxSize_ ?! MaxTxSizeUTxO txSize_ maxTxSize_
 
   let maxTxEx = getField @"_maxTxExUnits" pp
-  txExunits txb <= maxTxEx ?! ExUnitsTooSmallUTxO maxTxEx (txExunits txb)
+  totExunits tx <= maxTxEx ?! ExUnitsTooSmallUTxO maxTxEx (totExunits tx)
 
   utxoS tx
 
@@ -351,8 +342,7 @@ utxoS _tx = undefined
 
 instance
   forall era.
-  ( Era era,
-    ValidateScript era,
+  ( ValidateScript era,
     Embed (Core.EraRule "PPUP" era) (AlonzoUTXO era),
     Environment (Core.EraRule "PPUP" era) ~ PPUPEnv era,
     State (Core.EraRule "PPUP" era) ~ PPUPState era,
@@ -368,6 +358,7 @@ instance
     HasField "_maxTxSize" (Core.PParams era) Natural,
     HasField "_prices" (Core.PParams era) Prices,
     HasField "_maxTxExUnits" (Core.PParams era) ExUnits,
+    HasField "vldt" (Alonzo.TxBody era) ValidityInterval,
     -- We fix Core.Value, Core.TxBody, and Core.TxOut
     Core.Value era ~ Alonzo.Value (Crypto era),
     Core.TxBody era ~ Alonzo.TxBody era,

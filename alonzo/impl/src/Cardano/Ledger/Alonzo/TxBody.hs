@@ -328,31 +328,38 @@ instance (c ~ Crypto era, Era era) => HashAnnotated (TxBody era) EraIndependentT
 -- constraint as a precondition. This is unnecessary, as one can see below
 -- they need not be constrained at all. This should be fixed in the GHC compiler.
 
-inputs' ::     TxBody era -> Set (TxIn (Crypto era))
+inputs' :: TxBody era -> Set (TxIn (Crypto era))
 inputs_fee' :: TxBody era -> Set (TxIn (Crypto era))
-outputs' ::       TxBody era -> StrictSeq (TxOut era)
-certs' ::      TxBody era -> StrictSeq (DCert (Crypto era))
-txfee' ::        TxBody era -> Coin
-wdrls' ::      TxBody era -> Wdrl (Crypto era)
-vldt' ::       TxBody era -> ValidityInterval
-update' ::    TxBody era -> StrictMaybe (Update era)
-adHash' ::     TxBody era -> StrictMaybe (AuxiliaryDataHash (Crypto era))
-mint' ::       TxBody era -> Value (Crypto era)
-sdHash' ::     TxBody era -> StrictMaybe (WitnessPPDataHash (Crypto era))
+outputs' :: TxBody era -> StrictSeq (TxOut era)
+certs' :: TxBody era -> StrictSeq (DCert (Crypto era))
+txfee' :: TxBody era -> Coin
+wdrls' :: TxBody era -> Wdrl (Crypto era)
+vldt' :: TxBody era -> ValidityInterval
+update' :: TxBody era -> StrictMaybe (Update era)
+adHash' :: TxBody era -> StrictMaybe (AuxiliaryDataHash (Crypto era))
+mint' :: TxBody era -> Value (Crypto era)
+sdHash' :: TxBody era -> StrictMaybe (WitnessPPDataHash (Crypto era))
+inputs' (TxBodyConstr (Memo raw _)) = _inputs raw
 
-inputs'     (TxBodyConstr (Memo raw _)) = _inputs raw
 inputs_fee' (TxBodyConstr (Memo raw _)) = _inputs_fee raw
-outputs'       (TxBodyConstr (Memo raw _)) = _outputs raw
-certs'      (TxBodyConstr (Memo raw _)) = _certs raw
-wdrls'      (TxBodyConstr (Memo raw _)) = _wdrls raw
-txfee'        (TxBodyConstr (Memo raw _)) = _txfee raw
-vldt'       (TxBodyConstr (Memo raw _)) = _vldt raw
-update'    (TxBodyConstr (Memo raw _)) = _update raw
-adHash'     (TxBodyConstr (Memo raw _)) = _adHash raw
-mint'       (TxBodyConstr (Memo raw _)) = _mint raw
-sdHash'     (TxBodyConstr (Memo raw _)) = _sdHash raw
 
+outputs' (TxBodyConstr (Memo raw _)) = _outputs raw
 
+certs' (TxBodyConstr (Memo raw _)) = _certs raw
+
+wdrls' (TxBodyConstr (Memo raw _)) = _wdrls raw
+
+txfee' (TxBodyConstr (Memo raw _)) = _txfee raw
+
+vldt' (TxBodyConstr (Memo raw _)) = _vldt raw
+
+update' (TxBodyConstr (Memo raw _)) = _update raw
+
+adHash' (TxBodyConstr (Memo raw _)) = _adHash raw
+
+mint' (TxBodyConstr (Memo raw _)) = _mint raw
+
+sdHash' (TxBodyConstr (Memo raw _)) = _sdHash raw
 
 --------------------------------------------------------------------------------
 -- Serialisation
